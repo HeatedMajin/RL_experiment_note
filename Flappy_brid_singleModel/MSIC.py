@@ -12,13 +12,13 @@ from torch.autograd import Variable
 from Brid_DQN import *
 import shutil
 
-IMAGE_SIZE = (72, 128)
-
+IMAGE_SIZE = (128,72)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    torch.save(state, filename)
+    torch.save(state, "checkpoint/"+filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+        shutil.copyfile("checkpoint/"+filename, "checkpoint/"+'model_best.pth.tar')
 
 
 def load_checkpoint(filename, model):
@@ -28,10 +28,8 @@ def load_checkpoint(filename, model):
         # load weight saved on gpy device to cpu device
         # see https://discuss.pytorch.org/t/on-a-cpu-device-how-to-load-checkpoint-saved-on-gpu-device/349/3
         checkpoint = torch.load(filename, map_location=lambda storage, loc: storage)
-    if 'episode' in checkpoint:
-        episode = checkpoint['episode']
-    else:
-        episode = checkpoint['episode:']
+
+    episode = checkpoint['episode']
     epsilon = checkpoint['epsilon']
     print('pretrained episode = {}'.format(episode))
     print('pretrained epsilon = {}'.format(epsilon))
@@ -49,41 +47,39 @@ def preprocess(frame):
        Downsampling to 128x72 size and convert to grayscale
        frame -- input frame, rgb image with 512x288 size
     """
-    im = Image.fromarray(frame).resize(IMAGE_SIZE).convert(mode='L')
+    im = Image.fromarray(frame).crop((0, 0, 400, 288)).resize(IMAGE_SIZE).convert(mode='L')
     out = np.asarray(im).astype(np.float32)
     out[out <= 1.] = 0.0
     out[out > 1.] = 1.0
     return out
 
 
-def train(model, options, resume):
-    if resume:
-        if options.weight is None:
-            print('when resume, you should give weight file name.')
-            return
+def train(model, options):
+
+    if options.resume:
         print('load previous model weight: {}'.format(options.weight))
-        _, _, best_time_step = load_checkpoint(options.weight, model)
+        episode_start, _, best_time_step = load_checkpoint(options.weight, model)
+    else:
+        episode_start,best_timestep = 1,0
 
     flappyBird = game.GameState()
-
-    best_timestep = 0
     optimizer = optim.RMSprop(model.parameters(), lr=options.lr)
     ceriterion = nn.MSELoss()
 
     action = [1, 0]  # do nothing
     obs, reward, terminal = flappyBird.frame_step(action)
     obs = preprocess(obs)
-    model.set_initial_state()
+    model.set_initial_state(obs)
 
-    # in the first `OBSERVE` time steos, we dont train the model
+    # in the first `OBSERVE` time steps, we dont train the model
     for i in range(options.observation):
-        action = model.random_action()
+        action = model.take_action()
         obs_next, r, terminal = flappyBird.frame_step(action)
         obs_next = preprocess(obs_next)
         model.store_trans(action=action, reward=r, next_obs=obs_next, finish=terminal)
 
     # start training
-    for episode in range(options.max_episode):
+    for episode in range(episode_start,options.max_episode+1):
         model.time_step = 0
         model.set_trainable(True)
         total_reward = 0.
@@ -92,10 +88,9 @@ def train(model, options, resume):
         while True:
             optimizer.zero_grad()
 
-            # e-greedy to choose an action
-            action = model.take_action(obs)
+            action = model.take_action() # e-greedy to choose an action
             o_next, r, terminal = flappyBird.frame_step(action)
-            total_reward += options.gamma ** model.time_step * r
+            total_reward += r #options.gamma ** model.time_step * r
             o_next = preprocess(o_next)
             model.store_trans(action, r, o_next, terminal)
             model.increase_timestep()
@@ -107,23 +102,28 @@ def train(model, options, resume):
             reward_batch = np.array([data[2] for data in minibatch])
             next_state_batch = np.array([data[3] for data in minibatch])
 
-            state_batch_var = Variable(torch.from_numpy(state_batch))
-            next_state_batch_var = Variable(torch.from_numpy(next_state_batch), requires_grad=False)
+            state_batch_var = Variable(torch.from_numpy(state_batch)).to(device)
+            next_state_batch_var = Variable(torch.from_numpy(next_state_batch), requires_grad=False).to(device)
 
             # Step 2: calculate y
             q_value_next = model.forward(next_state_batch_var)  # S'下的所有action的Q table项
             q_value = model.forward(state_batch_var)  # S 下的所有action的Q table项
             max_q, _ = torch.max(q_value_next, dim=1)  # S'下的所有action的Q table项中的最大值
 
-            # Bellman optimal equation : V[s] = max_a( reward[s,a] + gamma * Q[s,a] )
+            # Bellman optimal equation : (使用下一个状态估算当前状态的value)
+            # V[s] = max_a( Q[s,a] )
+            #      = max_a( reward[s,a] + gamma * V[s_] )
+            #      = max_a( reward[s,a] + gamma * max_a_( Q[s_,a_] ) )
             y = reward_batch.astype(np.float32)
             for i in range(options.batch_size):
                 if not minibatch[i][4]:
                     y[i] += options.gamma * max_q.data[i]
-            y = Variable(torch.from_numpy(y))
+            y = Variable(torch.from_numpy(y)).to(device)
 
-            # Q table和V func的关系：V[s] = sum_a ( p(a|s) * q[s,a] )
-            action_batch_var = Variable(torch.from_numpy(action_batch))
+            # Q table和V func的关系：（使用q table计算当前状态的value）
+            # V[s] = sum_a ( p(a|s) * q[s,a] )
+            action_batch_var = Variable(torch.from_numpy(action_batch)).to(device)
+
             q_value = torch.sum(torch.mul(action_batch_var, q_value), dim=1)
 
             loss = ceriterion(q_value, y)
@@ -143,6 +143,7 @@ def train(model, options, resume):
             delta = (options.init_e - options.final_e) / options.exploration
             model.epsilon -= delta
 
+        ave_time = 0
         # 每过100轮，测试一次模型
         if episode % 100 == 0:
             ave_time = test_dqn(model, episode)

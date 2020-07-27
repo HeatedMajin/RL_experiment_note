@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Bird_DQN(nn.Module):
     ''''
@@ -12,7 +13,7 @@ class Bird_DQN(nn.Module):
         Given image , the network will output what the action should be taken
     '''
 
-    empty_frame = np.zeros((128, 72), dtype=np.float32)
+    empty_frame = np.zeros((72, 128), dtype=np.float32)
     empty_state = np.stack((empty_frame, empty_frame, empty_frame), axis=0)
 
     def __init__(self, epsilon, mem_size):
@@ -21,7 +22,7 @@ class Bird_DQN(nn.Module):
         self.epsilon = epsilon
 
         self.actions_num = 2
-        self.model = self.buildDQN()
+        self.buildDQN()
 
         self.trainable = None
 
@@ -31,29 +32,32 @@ class Bird_DQN(nn.Module):
         self.time_step = 0
 
     def buildDQN(self):
-        self.map_size = (16, 16, 9)
+        self.map_size = (32, 16, 9)
 
-        self.conv1 = nn.Conv2d(3, 8, kernel_size=8, stride=4, padding=2)
-        self.relu1 = nn.LeakyReLU(inplace=True)
-        self.conv2 = nn.Conv2d(8, 16, kernel_size=4, stride=2, padding=1)
-        self.relu2 = nn.LeakyReLU(inplace=True)
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=8, stride=4, padding=2).to(device)
+        self.relu1 = nn.LeakyReLU(inplace=True).to(device)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1).to(device)
+        self.relu2 = nn.LeakyReLU(inplace=True).to(device)
 
-        self.fc1 = nn.Linear(self.map_size[0] * self.map_size[1] * self.map_size[2], 128)
-        self.relu3 = nn.LeakyReLU(inplace=True)
-        self.fc2 = nn.Linear(128, self.actions_num)
+        self.fc1 = nn.Linear(self.map_size[0] * self.map_size[1] * self.map_size[2], 128).to(device)
+        self.relu3 = nn.LeakyReLU(inplace=True).to(device)
+        self.fc2 = nn.Linear(128, self.actions_num).to(device)
 
     def set_trainable(self, trainable):
         self.trainable = trainable
 
-    def set_initial_state(self, state=None):
+    def set_initial_state(self, obs=None):
         """
         Set initial state
         state: initial state. if None, use `BrainDQN.empty_state`
         """
-        if state is None:
+        if obs is None:
             self.current_state = Bird_DQN.empty_state
+
         else:
-            self.current_state = state
+            self.current_state = np.append(Bird_DQN.empty_state[1:, :, :], obs.reshape((1,) + obs.shape),
+                                           axis=0)
+
 
     def forward(self, obs):
         # get Q estimation
@@ -68,9 +72,8 @@ class Bird_DQN(nn.Module):
         return out
 
     def optimal_action(self):  # greedy choose (exploitation)
-        # obs = Variable(torch.from_numpy(obs), volatile=True).unsqueeze(0).unsqueeze(0)
         state = self.current_state
-        state_var = Variable(torch.from_numpy(state), requires_grad=False).unsqueeze(0)
+        state_var = Variable(torch.from_numpy(state), requires_grad=False).unsqueeze(0).to(device)
 
         q_values = self.forward(state_var)
         _, actions_index = torch.max(q_values, dim=1)
@@ -85,8 +88,8 @@ class Bird_DQN(nn.Module):
         action[action_index] = 1
         return action
 
-    def take_action(self, obs):
-        if self.trainable and np.random.random() < self.epsilon:
+    def take_action(self):
+        if np.random.random() < self.epsilon:
             return self.random_action()
         else:
             return self.optimal_action()

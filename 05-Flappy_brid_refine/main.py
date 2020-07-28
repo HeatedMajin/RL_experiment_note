@@ -43,7 +43,7 @@ def load_checkpoint(filename, model):
     except:
         # load weight saved on gpy device to cpu device
         # see https://discuss.pytorch.org/t/on-a-cpu-device-how-to-load-checkpoint-saved-on-gpu-device/349/3
-        checkpoint = torch.load(filename, map_location=lambda storage, loc: storage)
+        checkpoint = torch.load("check_point/" + filename, map_location=lambda storage, loc: storage)
     episode = checkpoint['episode']
     epsilon = checkpoint['epsilon']
     print('pretrained episode = {}'.format(episode))
@@ -208,8 +208,9 @@ if __name__ == '__main__':
     config.resume_file = ""
     config.resume = (config.resume_file != "")
 
-    if True:#args.train:
+    if args.train:
         agent = Agent(config)
         train(agent, config)
     else:
-        play("checkpoint-episode-28000.pth.tar", config)
+        #play("checkpoint-episode-18000.pth.tar", config)
+        play("model_best.pth.tar", config)

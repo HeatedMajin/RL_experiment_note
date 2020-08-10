@@ -2,6 +2,19 @@
 - 使用teacher model和student model两个model
 - 当student model更新50次时，teacher model copy一次
 
+## 目录结构
+```
+assetes/    ---- 游戏资源文件夹
+checkpoint/ ---- 训练模型保存
+game/       ---- 游戏文件夹
+utils/      ---- 一些无关紧要的
+
+Agent.py    ---- 定义Agent
+Bird_DQN.py ---- 模型定义
+main.py     ---- 入口函数 + 功能函数：包括模型train/play、模型评估、模型保存
+```
+
+
 ## state 和 action
 #### state：
 - 连续三帧构成
@@ -27,3 +40,5 @@
 
 ### 使用Huber loss计算，current_q_values和excepted_q_values之间的差距
     
+# 更多的DQN模型
+[here](https://github.com/qfettes/DeepRL-Tutorials)

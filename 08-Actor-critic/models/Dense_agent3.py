@@ -16,14 +16,22 @@ class Dense_Policy(nn.Module):
         self.gamma = gamma
         self.eps = np.finfo(np.float64).eps.item()
 
-        self.build_layers(input_features, action_nums)
-        self.optimizer = optim.Adam(self.parameters(), lr=1e-3)#,weight_decay=1e-2)
+        self.policyNet,self.valueNet = self.build_nets(input_features, action_nums)
+        self.optimizer = optim.Adam(self.parameters(), lr=1e-3)
+        self.lr = 1e-3
 
         # 这个action的log prob和这个action的reward
         self.logProbs_values = []
         self.reward_batch = []
 
+        self.policy_grads = {}
+        self.policy_params = {}
+        for name, p in self.named_parameters():
+            if "dense" in name or "action" in name:
+                self.policy_params[name] = p
+
     def build_layers(self, input_features, action_nums):
+        policyNet = nn.Sequential()
         self.dense1 = nn.Linear(input_features, input_features * 16).to(device)
         self.drop1 = nn.Dropout(p=0.2).to(device)
         self.dense2 = nn.Linear(input_features * 16, action_nums * 32).to(device)
@@ -73,9 +81,9 @@ class Dense_Policy(nn.Module):
                     TD0 = r + self.gamma * self.logProbs_values[batch_id][i + 1][1]
                 TD0_estimation.append(TD0.detach())
 
-        flatten_logProbs = [s for batch in self.logProbs_values for s in batch]  #.to(device)
+        flatten_logProb_value = [prob_value for batch in self.logProbs_values for prob_value in batch]  #.to(device)
 
-        for (logProb, value), TD0 in zip(flatten_logProbs, TD0_estimation):
+        for (logProb, value), TD0 in zip(flatten_logProb_value, TD0_estimation):
             # A[s,a]= "TD estimation of s_t" - "value of s_t"
             #       = (r + gamma * V[s_t+1]) - V[s_t]
             advantage = TD0 - value
@@ -83,51 +91,27 @@ class Dense_Policy(nn.Module):
             value_loss.append(F.smooth_l1_loss(TD0.reshape(-1), value.reshape(-1)))
 
         self.optimizer.zero_grad()
-        policy_loss_sum = torch.stack(policy_loss).sum()  #.mean()
-        value_loss_sum = torch.stack(value_loss).sum()  #.mean()
-
-        loss = policy_loss_sum + value_loss_sum
-        print("\t" + str(loss.item()))
-        loss.backward()
-        self.optimizer.step()
-
-        del self.logProbs_values[:]
-        del self.reward_batch[:]
-
-    def update_policy2(self):
-        policy_loss, value_loss, TD0_estimation = [], [], []
-        # for each episode
-        for batch_id, reward_list in enumerate(self.reward_batch):
-            # for each time step
-            for i, r in enumerate(reward_list):
-                if i == len(reward_list) - 1:
-                    # 最后一个action没有后续,TD0估计就是action的reward
-                    TD0 = torch.scalar_tensor(r).to(device)
-                else:
-                    # TD0 = r + gamma * V[s_t+1]
-                    TD0 = r + self.gamma * self.logProbs_values[batch_id][i + 1][1]
-                TD0_estimation.append(TD0.detach())
-
-        flatten_logProbs = [s for batch in self.logProbs_values for s in batch]  #.to(device)
-
-        for (logProb, value), TD0 in zip(flatten_logProbs, TD0_estimation):
-            # A[s,a]= "TD estimation of s_t" - "value of s_t"
-            #       = (r + gamma * V[s_t+1]) - V[s_t]
-            advantage = TD0 - value
-            policy_loss.append(-1 * logProb * advantage)
-            value_loss.append(F.smooth_l1_loss(TD0.reshape(-1), value.reshape(-1)))
+        policy_loss_sum = torch.stack(policy_loss).sum()
+        policy_loss_sum.backward(retain_graph=True)
+        print("\t" + str(policy_loss_sum.item()), end="")
+        #保存policy network部分的变量梯度
+        for name, param in self.policy_params.items():
+            self.policy_grads[name] = param.grad
 
         self.optimizer.zero_grad()
-        policy_loss_sum = torch.stack(policy_loss).sum()#.mean()
-        value_loss_sum = torch.stack(value_loss).sum()#.mean()
+        value_loss_sum = torch.stack(value_loss).sum()
+        value_loss_sum.backward()
+        print("\t" + str(value_loss_sum.item()))
+        #计算梯度后，加上先前保存变量的梯度
+        for name, param in self.named_parameters():
+            if name in self.policy_grads:
+                param.grad = param.grad + self.policy_grads[name]
 
-        loss = policy_loss_sum + value_loss_sum
-        print("\t" + str(loss.item()))
-        loss.backward()
         self.optimizer.step()
 
         del self.logProbs_values[:]
         del self.reward_batch[:]
+        self.policy_grads = {}
 
     def save_policy(self, save_path, save_filename):
         torch.save(self.state_dict(), os.path.join(save_path, save_filename))

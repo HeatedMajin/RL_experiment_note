@@ -11,7 +11,6 @@ from models.Dense_agent import Dense_Policy
 parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N', help='random seed (default: 543)')
-parser.add_argument('--render', action='store_true', help='render the environment')
 args = parser.parse_args()
 
 env = gym.make('CartPole-v0')
@@ -28,8 +27,7 @@ for i_episode in count(1):
     for t in range(1, 10000):  # Don't infinite loop while learning
         action = policy.select_action(state)
         state, reward, done, _ = env.step(action)
-        if args.render:
-            env.render()
+
         #### 保存这个action的reward ####
         policy.reward_pre_action.append(reward)
         ep_reward += reward

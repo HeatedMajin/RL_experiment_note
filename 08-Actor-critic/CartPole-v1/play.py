@@ -18,12 +18,11 @@ torch.manual_seed(args.seed)
 
 policy = Dense_Policy(input_features=4, action_nums=2,gamma=args.gamma)
 policy.eval()
-policy.train_step=False
 policy.load_state_dict(torch.load('result.pt.tar'))
 
 state, ep_reward, done,T = env.reset(), 0, False,0
 while not done:
-    action = policy.select_action(state)
+    action, _, _ = policy.select_action(state)
     state, reward, done, _ = env.step(action)
     env.render()
     ep_reward += reward

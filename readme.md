@@ -1,16 +1,22 @@
 # 关于项目结构
 ```
-00-something magical    ---- 比较了Value based的四种方法：MDP(policy iteration、value iteration)
+00-something magical    ---- 比较了Value based的四种方法：model-based 和 model-free
+
+value based：
 01-Model-based          ---- Model-based(policy iteration、value iteration) for gridWorld game
 02-Model-free           ---- Model-free(SARSA、Q-learning) for gridworld、cliff、mountainCar games   
 
+value based with value function approximation：
 03-Semi-gradient_SARSA  ---- SARSA for scaling up RL(linear
 04-Flappy_bird_sigle    ---- DQN for Flappy bird game(but not fixed target)
 05-Flappy_bird_refine   ---- DQN for Flappy bird game
                             (fixed target + replay memory)
 
+policy based：
 06-CEM                  ---- cross-entropy method(对于不可导或者难以求导的policy)
 07-REINFORCE            ---- Monte-Carlo policy gradient(actual return)
+
+Actor-critic：
 08-Actor-cirtic         ---- 有点结合value-based和policy-based的味道
 09-PPO                  ---- proximal policy optimization
                             (target policy + replay memory，减少了采样时间，一次采样可以多次训练)
